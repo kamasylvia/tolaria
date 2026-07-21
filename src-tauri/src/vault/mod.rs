@@ -325,7 +325,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
     "cmd",
 ];
 
-/// Classify a file extension into "markdown", "text", or "binary".
+/// Classify a file extension into "markdown", "typst", "text", or "binary".
 pub(crate) fn classify_file_kind(path: &Path) -> &'static str {
     let ext = match path.extension() {
         Some(e) => e.to_string_lossy().to_lowercase(),
@@ -357,6 +357,8 @@ pub(crate) fn classify_file_kind(path: &Path) -> &'static str {
     };
     if ext == "md" || ext == "markdown" {
         "markdown"
+    } else if ext == "typ" || ext == "typst" {
+        "typst"
     } else if TEXT_EXTENSIONS.contains(&ext.as_str()) {
         "text"
     } else {

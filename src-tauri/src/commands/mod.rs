@@ -11,6 +11,7 @@ mod pdf_export;
 mod runtime;
 mod sheet;
 mod system;
+mod typst_preview;
 mod vault;
 mod version;
 
@@ -28,6 +29,7 @@ pub use pdf_export::*;
 pub use runtime::*;
 pub use sheet::*;
 pub use system::*;
+pub use typst_preview::*;
 pub use vault::*;
 pub use version::*;
 

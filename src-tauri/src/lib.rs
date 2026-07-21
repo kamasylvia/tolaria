@@ -595,6 +595,7 @@ macro_rules! app_invoke_handler {
             commands::can_export_current_webview_pdf,
             commands::export_current_webview_pdf,
             commands::resolve_sheet_external_formula_inputs,
+            commands::render_typst,
             commands::list_views,
             commands::save_view_cmd,
             commands::delete_view_cmd,

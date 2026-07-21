@@ -16,7 +16,7 @@ pub(super) fn evaluate_relationship_op(
             relationship_target(value).is_some_and(|target| relationships.contains(&target))
         }
         FilterOp::NotContains => {
-            relationship_target(value).map_or(true, |target| !relationships.contains(&target))
+            relationship_target(value).is_none_or(|target| !relationships.contains(&target))
         }
         FilterOp::AnyOf => relationships.matches_any(&relationship_values(value)),
         FilterOp::NoneOf => !relationships.matches_any(&relationship_values(value)),

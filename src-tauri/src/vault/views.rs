@@ -459,7 +459,7 @@ fn evaluate_scalar_op(
         FilterOp::NotContains => !scalar_contains(field_value, cond_value),
         FilterOp::AnyOf => scalar_matches_any(field_value, raw_value),
         FilterOp::NoneOf => !scalar_matches_any(field_value, raw_value),
-        FilterOp::IsEmpty => field_value.map_or(true, str::is_empty),
+        FilterOp::IsEmpty => field_value.is_none_or(str::is_empty),
         FilterOp::IsNotEmpty => field_value.is_some_and(|s| !s.is_empty()),
         FilterOp::Before => {
             scalar_date_compare(field_value, cond_value, |field, target| field < target)

@@ -6,7 +6,7 @@ authors = ["Luca Rossi"]
 license = "AGPL-3.0-or-later"
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.92"
 
 [lib]
 name = "tolaria_lib"
@@ -45,6 +45,10 @@ tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 tauri-plugin-deep-link = "2.4.9"
 tauri-plugin-single-instance = { version = "2.4.2", features = ["deep-link"] }
+typst = "0.15.1"
+typst-svg = "0.15.1"
+typst-layout = "0.15.1"
+typst-assets = { version = "0.15.1", features = ["fonts"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"

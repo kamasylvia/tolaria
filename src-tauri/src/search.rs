@@ -186,7 +186,7 @@ fn searchable_content(content: &str, exclude_frontmatter: bool) -> &str {
 }
 
 fn is_markdown_search_candidate(vault_dir: &Path, path: &Path) -> bool {
-    if !path.extension().is_some_and(|ext| ext == "md") {
+    if path.extension().is_none_or(|ext| ext != "md") {
         return false;
     }
 
