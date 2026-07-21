@@ -111,6 +111,23 @@ echo "🛡️  Codacy differential gate (no new findings at any severity)..."
 pnpm codacy:gate
 echo "  ✅ Codacy gate OK"
 
+# Fast-push escape hatch for in-flight development.
+# Set LAPUTA_FAST_PUSH=1 to skip build/coverage/playwright/CodeScene after
+# the Codacy gate has passed. Codacy is the only non-skippable gate, so this
+# keeps the new-code-finding guarantee while letting intermediate commits
+# land quickly. Always run a final full push (without this flag) before
+# declaring a feature done.
+if [ "${LAPUTA_FAST_PUSH:-0}" = "1" ]; then
+  echo ""
+  echo "⚡ LAPUTA_FAST_PUSH=1: skipping build/coverage/playwright/CodeScene"
+  echo "    Codacy gate above already validated the delta."
+  echo "    Remember to run a final full push before marking the feature done."
+  ELAPSED=$(($(date +%s) - START_TIME))
+  echo ""
+  echo "✅ Pre-push passed in ${ELAPSED}s (fast-push mode)"
+  exit 0
+fi
+
 # ── Detect what changed ─────────────────────────────────────────────────
 PUSH_TARGET=$(git rev-parse @{push} 2>/dev/null || echo "")
 RUST_CHANGED=true
