@@ -212,8 +212,9 @@ tree builder 物化虚拟 clone 子节点（无文件），点击跳转本体；
 
 ---
 
-## 8. 待决问题
+## 8. 待决问题（已决）
 
-- [ ] GitHub fork 的 Actions 是否需要重新启用？之前禁用是因为"Azure Pipelines 承担 CI"，现在 ADO 废除了，要不要让 GitHub Actions 重新跑 build/test CI？
-- [ ] 上游 CI failing 时同步策略选 A/B/C？
-- [ ] CodeScene 是否启用？（之前用户说"不用 CodeScene"，但 fork 自己的代码质量度量可能仍有价值）
+- [x] **GitHub Actions**：暂不启用。基础功能完成后再考虑。
+- [x] **CI**：暂时不启用。基础功能完成后再考虑。
+- [x] **CodeScene**：不启用。
+- [ ] 上游 CI failing 时同步策略选 A/B/C？（基础功能完成后再定）
