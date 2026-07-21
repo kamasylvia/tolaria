@@ -80,6 +80,9 @@ CODE-HEALTH-REPORT.md
 # Infisical local project binding (contains workspaceId, do not commit)
 .infisical.json
 
+# Local agent workspace (ZCode plans, scratch)
+.zcode/
+
 # Codacy's runtime cache is local, while the pinned launcher and the two
 # rule configurations used by the repository gate are versioned.
 .codacy/*

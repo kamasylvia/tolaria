@@ -36,9 +36,21 @@ export function isHtmlFileEntry(entry: Pick<VaultEntry, 'filename' | 'path'>): b
   return extension === 'html' || extension === 'htm'
 }
 
+export function isTypstFileEntry(entry: Pick<VaultEntry, 'filename' | 'path'>): boolean {
+  const extension = previewExtension(entry)
+  return extension === 'typ' || extension === 'typst'
+}
+
 export function entrySupportsPreviewSourceToggle(entry: Pick<VaultEntry, 'filename' | 'path'>): boolean {
   const extension = previewExtension(entry)
-  return extension === 'md' || extension === 'markdown' || extension === 'html' || extension === 'htm'
+  return (
+    extension === 'md' ||
+    extension === 'markdown' ||
+    extension === 'html' ||
+    extension === 'htm' ||
+    extension === 'typ' ||
+    extension === 'typst'
+  )
 }
 
 export function isImagePreviewEntry(entry: Pick<VaultEntry, 'fileKind' | 'filename' | 'path'>): boolean {

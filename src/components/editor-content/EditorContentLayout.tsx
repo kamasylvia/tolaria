@@ -8,6 +8,7 @@ import { dispatchEditorFindAvailability } from '../../utils/editorFindEvents'
 import { DiffView } from '../DiffView'
 import { BreadcrumbBar } from '../BreadcrumbBar'
 import { HtmlFilePreview } from '../HtmlFilePreview'
+import { TypstPreview } from '../TypstPreview'
 import { ArchivedNoteBanner } from '../ArchivedNoteBanner'
 import { ConflictNoteBanner } from '../ConflictNoteBanner'
 import { RawEditorView } from '../RawEditorView'
@@ -358,6 +359,7 @@ type EditorCanvasProps = Pick<
   EditorContentModel,
   | 'showEditor'
   | 'isHtmlPreview'
+  | 'isTypstPreview'
   | 'isSheet'
   | 'richEditorContentReady'
   | 'cssVars'
@@ -382,6 +384,15 @@ function EditorCanvas(props: EditorCanvasProps) {
         content={props.activeTab.content}
         path={props.activeTab.entry.path}
         title={props.activeTab.entry.title}
+        vaultPath={props.vaultPath ?? ''}
+      />
+    )
+  }
+  if (props.isTypstPreview && props.activeTab) {
+    return (
+      <TypstPreview
+        content={props.activeTab.content}
+        path={props.activeTab.entry.path}
         vaultPath={props.vaultPath ?? ''}
       />
     )
@@ -519,6 +530,7 @@ export function EditorContentLayout(model: EditorContentModel) {
     sheetFlushRef,
     noteWidth,
     isHtmlPreview,
+    isTypstPreview,
     isSheet,
     richEditorContentReady,
     findRequest,
@@ -528,7 +540,7 @@ export function EditorContentLayout(model: EditorContentModel) {
   } = model
   const rootClassName = cn(
     'flex flex-1 flex-col min-w-0 min-h-0',
-    isHtmlPreview || isSheet || noteWidth === 'wide' ? 'editor-content-width--wide' : 'editor-content-width--normal',
+    isHtmlPreview || isTypstPreview || isSheet || noteWidth === 'wide' ? 'editor-content-width--wide' : 'editor-content-width--normal',
   )
   const chromeTab = activeTab ?? loadingTab
   const chromePath = chromeTab?.entry.path ?? path
@@ -577,6 +589,7 @@ export function EditorContentLayout(model: EditorContentModel) {
           <EditorCanvas
             showEditor={showEditor}
             isHtmlPreview={isHtmlPreview}
+            isTypstPreview={isTypstPreview}
             richEditorContentReady={richEditorContentReady}
             cssVars={cssVars}
             activeTab={activeTab}

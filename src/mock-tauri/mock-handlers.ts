@@ -441,6 +441,7 @@ export const mockHandlers: Record<string, (args: any) => any> = {
   delete_view_cmd: () => {},
   reload_vault: () => MOCK_ENTRIES,
   reload_vault_entry: (args: { path: string }) => MOCK_ENTRIES.find(e => e.path === args.path) ?? { path: args.path, title: 'Unknown', filename: 'unknown.md', aliases: [], belongsTo: [], relatedTo: [], archived: false, snippet: '', wordCount: 0, fileSize: 0, relationships: {}, outgoingLinks: [], properties: {} },
+  render_typst: () => '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><text x="0" y="20">Typst mock preview</text></svg>',
   sync_note_title: () => false,
   get_note_content: (args: { path: string }) => MOCK_CONTENT[args.path] ?? '',
   validate_note_content: (args: { path: string; content: string }) => (MOCK_CONTENT[args.path] ?? '') === args.content,
