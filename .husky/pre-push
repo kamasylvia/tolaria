@@ -128,7 +128,7 @@ if [ -n "$PUSH_TARGET" ]; then
       site/*)
         SITE_CHANGED=true
         ;;
-      .github/workflows/*|.husky/*|docs/*|*.md)
+      .github/workflows/*|.husky/*|docs/*|*.md|.gitignore|.gitattributes|.editorconfig|.npmrc|.nvmrc|.prettier*|.eslintcache)
         ;;
       *)
         APP_CHANGED=true
