@@ -78,8 +78,8 @@
 - 新建 `src-tauri/src/commands/typst.rs`：`#[tauri::command] render_typst(entry_path, root_path, main_path) -> Result<String, String>` 返回合并多页 SVG
 - 实现 `typst::World`（参考 `typst-cli` / `typst-as-lib`，约 80 行）
 - `src-tauri/src/commands/mod.rs` 加 `pub mod typst;` + re-export
-- `src-tauri/src/lib.rs` 在 `app_invoke_handler!` 宏注册 `commands::render_typst`
-- `src-tauri/src/vault/mod.rs` 的 `classify_file_kind` 加 `.typ`/`.typst` → 新 `fileKind: "typst"`
+- `src-tauri/src/lib.rs:485` 在 `app_invoke_handler!` 宏注册 `commands::render_typst`
+- `src-tauri/src/vault/mod.rs:329 classify_file_kind` 加 `.typ`/`.typst` → 新 `fileKind: "typst"`
 
 **前端**：
 - `src/utils/filePreview.ts`：`FilePreviewKind` 加 `'typst'`，扩展名集合加 `'typ'`/`'typst'`；放宽 `if (entry.fileKind && entry.fileKind !== 'binary') return null` 守卫
@@ -98,9 +98,9 @@
 
 ### 交付清单
 
-- [ ] ADR-0170：Typst 预览渲染选型（引 ADR-0002/0108/0136/0154）
+- [ ] ADR-0171：Typst 预览渲染选型（引 ADR-0002/0108/0136/0154）。编号接上游 0170（`measurable-crash-safe-startup`）
 - [ ] `src-tauri/src/commands/typst.rs` + World impl + `render_typst` 命令
-- [ ] `src-tauri/src/vault/mod.rs` 的 `classify_file_kind` 加 `.typ`
+- [ ] `src-tauri/src/vault/mod.rs:329 classify_file_kind` 加 `.typ`（`TEXT_EXTENSIONS` 在 `mod.rs:260`）
 - [ ] `src/utils/filePreview.ts` + `src/components/FilePreview.tsx` 加 typst 分支
 - [ ] 入口锚点 4 层解析 + UI（frontmatter / pin / auto-detect / single-file）
 - [ ] vitest（前端分发）+ `cargo test`（World 实现）
@@ -110,9 +110,13 @@
 
 ### 关键参考
 
+- **ADR-0168**（Sandboxed standalone HTML file previews，2026-07-20）—— 最近的"standalone 文件预览"范例，editor pane 里 sanitized opaque-origin iframe + raw-mode 源码编辑切换。Typst 预览形态最接近这个 ADR，`src/components/HtmlFilePreview.tsx` 是直接的代码模板
+- **ADR-0136**（macOS Webview PDF Export）—— 若 Typst 走"编译 PDF 再预览"分支，复用这条路径
+- **ADR-0086/0098/0110/0121** —— image/pdf/media preview 演进链，`FilePreview.tsx` 的扩展规则与 `<object>` PDF 模式来源
 - tinymist 项目/入口模型：<https://myriad-dreamin.github.io/tinymist/feature/project.html>
 - `typst` crate `World` trait：<https://docs.rs/typst/latest/typst/trait.World.html>
 - typst.ts VFS（备选方案）：<https://github.com/Myriad-Dreamin/typst.ts/discussions/376>
+- dompurify 已在依赖（`3.4.12`），SVG 净化直接用
 
 ---
 
@@ -146,11 +150,11 @@ tree builder 物化虚拟 clone 子节点（无文件），点击跳转本体；
 
 **Rust**：
 - `src-tauri/src/vault/entry.rs`：`VaultEntry` 加 `clones: Vec<String>`
-- `src-tauri/src/vault/cache.rs`：`CACHE_VERSION` 升一级（携带派生 clone 索引）
+- `src-tauri/src/vault/cache.rs:25`：`CACHE_VERSION` 14 → 15（携带派生 clone 索引）
 - tree 物化：`scan_vault_folders` 或新命令按 `clones` 在容器目录下生成虚拟 `FolderNode`
 
 **前端**：
-- `src/types.ts` 的 `SidebarSelection` 加 clone 变体
+- `src/types.ts:295 SidebarSelection` 加 clone 变体
 - `src/components/FolderTree.tsx` + `folder-tree/FolderTreeRow.tsx`：渲染 clone 节点 + Trilium 式角标
 - 删除语义：从 `_clones:` 移除一项 = 删该位置（Trilium delete-branch）；删本体 = 永久删除（ADR-0045），clone 变悬空 stub
 - 重命名：本体改名骑现有 wikilink-retarget（ADR-0036/0075）
@@ -158,7 +162,7 @@ tree builder 物化虚拟 clone 子节点（无文件），点击跳转本体；
 
 ### 交付清单
 
-- [ ] ADR-0171：Softlinks 数据模型（`_clones:` + 虚拟节点 + `CACHE_VERSION` 升级）
+- [ ] ADR-0172：Softlinks 数据模型（`_clones:` + 虚拟节点 + `CACHE_VERSION` 升级）
 - [ ] `VaultEntry` 加 `clones` 字段 + frontmatter 解析
 - [ ] tree 物化虚拟 `FolderNode`
 - [ ] 前端 `FolderTree` clone 节点渲染 + 角标
@@ -172,7 +176,7 @@ tree builder 物化虚拟 clone 子节点（无文件），点击跳转本体；
 ## 5. 上游同步策略
 
 - **日常**：`git fetch upstream && git merge upstream/main`，处理冲突后 push 到 origin
-- **冲突高发区**：`EditorContentLayout.tsx`、`FilePreview.tsx`、`mod.rs classify_file_kind`、`FolderTree.tsx`、`Sidebar.tsx`、`FolderNode`
+- **冲突高发区**：`EditorContentLayout.tsx`、`FilePreview.tsx`、`vault/mod.rs:329 classify_file_kind`、`FolderTree.tsx`、`Sidebar.tsx`、`FolderNode`
 - 改动尽量**独立新文件**（Typst 渲染独立组件、softlink 关系独立解析模块），降低与上游热区的冲突面
 - 上游是私有仓库，无法预知 CI 状态；同步后必须本地验证（`pnpm test`、`cargo check`）
 
@@ -208,7 +212,7 @@ tree builder 物化虚拟 clone 子节点（无文件），点击跳转本体；
 4. ⏳ **TODO.md + .gitignore `.infisical.json`** → commit + push（当前）
 5. ⏳ Typst 预览：brainstorming → spec → plan → 实现（§3）
 6. ⏳ Softlinks：brainstorming → spec → plan → 实现（§4）
-7. ⏳ ADR-0170 / 0171 跟随各自 commit
+7. ⏳ ADR-0171（Typst）/ 0172（softlinks）跟随各自 commit
 
 ---
 
