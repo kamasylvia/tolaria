@@ -35,6 +35,7 @@ pub mod pi_cli;
 mod pi_config;
 mod pi_discovery;
 mod pi_events;
+mod quick_launcher_window;
 pub mod search;
 pub mod settings;
 pub mod telemetry;
@@ -413,7 +414,12 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     setup_common_plugins(app)?;
 
     #[cfg(desktop)]
-    setup_desktop_plugins(app)?;
+    {
+        use tauri::Manager;
+
+        mcp::set_runtime_resource_dir(app.path().resource_dir()?);
+        setup_desktop_plugins(app)?;
+    }
 
     if telemetry::init_sentry_from_settings() {
         log::info!("Sentry initialized (crash reporting enabled)");
@@ -495,6 +501,7 @@ macro_rules! app_invoke_handler {
             commands::validate_note_content,
             commands::create_note_content,
             commands::create_quick_launcher_note,
+            quick_launcher_window::show_quick_launcher,
             commands::save_note_content,
             commands::update_frontmatter,
             commands::delete_frontmatter_property,

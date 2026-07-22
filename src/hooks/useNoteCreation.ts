@@ -24,6 +24,7 @@ import {
 } from '../utils/noteFormat'
 import type { VaultOption } from '../components/status-bar/types'
 import { useCreateNoteInFolderRequests } from './noteCreationRequests'
+import { requestEditorFocus } from './useEditorFocus'
 
 export interface NewEntryParams {
   path: string
@@ -502,9 +503,8 @@ function addEntryWithMock(entry: VaultEntry, content: string, addEntry: (e: Vaul
 
 /** Dispatch focus-editor event with perf timing marker. */
 function signalFocusEditor(opts?: { selectTitle?: boolean; path?: string }): void {
-  window.dispatchEvent(new CustomEvent('laputa:focus-editor', {
-    detail: { t0: performance.now(), selectTitle: opts?.selectTitle ?? false, path: opts?.path ?? null },
-  }))
+  const detail = { t0: performance.now(), selectTitle: opts?.selectTitle ?? false, path: opts?.path ?? null }
+  requestEditorFocus(detail)
 }
 
 interface PersistCallbacks {
@@ -514,14 +514,13 @@ interface PersistCallbacks {
 }
 
 /** Persist to disk; track pending state via onStart/onEnd. */
-async function persistOptimistic(request: PersistNewNoteRequest, cbs: PersistCallbacks): Promise<void> {
+function persistOptimistic(request: PersistNewNoteRequest, cbs: PersistCallbacks): Promise<void> {
   cbs.onStart?.(request.path)
-  try {
-    await persistNewNote(request)
+  return persistNewNote(request).then(() => {
     cbs.onPersisted?.(request.path)
-  } finally {
+  }).finally(() => {
     cbs.onEnd?.(request.path)
-  }
+  })
 }
 
 interface PersistResolvedOptions {
