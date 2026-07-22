@@ -49,6 +49,12 @@ typst = "0.15.1"
 typst-svg = "0.15.1"
 typst-layout = "0.15.1"
 typst-assets = { version = "0.15.1", features = ["fonts"] }
+# tinymist-world provides a production-grade typst::World with system font
+# search (fontdb; mmap mappings released after FontInfo computation) and HTTP
+# package registry (@preview/@local download + cache). It replaces the prior
+# hand-rolled World. The `system` feature pulls dirs/fontdb/chrono plus
+# http-registry (reqwest) and tinymist-{std,vfs,package} system support.
+tinymist-world = { version = "0.15.0", features = ["system"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"

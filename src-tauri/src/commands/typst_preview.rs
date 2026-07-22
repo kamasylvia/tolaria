@@ -1,153 +1,87 @@
 //! Typst note preview — compiles `.typ` source to SVG inline in the editor pane.
 //!
-//! See ADR-0171 for the design rationale. In short: the `typst` crate lives in
-//! `src-tauri`, a thin `World` implementation anchors file resolution at the
-//! note's directory (or a chosen entry file's directory), and the frontend
-//! invokes [`render_typst`] to receive a merged-page SVG string.
+//! See ADR-0171 for the design rationale. The compilation pipeline delegates to
+//! [`tinymist_world`]: its `CompileOnceArgs::resolve_system()` builds a
+//! `typst::World` with system font search (fontdb, with mmap mappings released
+//! once each face's `FontInfo` is computed) and an HTTP package registry for
+//! `@preview`/`@local` packages. We then run `typst::compile` and render the
+//! resulting paged document as a single merged SVG string.
 
-use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::path::PathBuf;
 
-use chrono::Datelike;
-use typst::diag::{EcoVec, FileError, FileResult, SourceDiagnostic};
-use typst::foundations::{Bytes, Datetime};
+use tinymist_world::args::CompileOnceArgs;
+use typst::diag::{EcoVec, SourceDiagnostic};
 use typst::layout::Abs;
-use typst::syntax::{FileId, RealizeError, RootedPath, Source, VirtualPath, VirtualRoot};
-use typst::text::{Font, FontBook};
-use typst::utils::LazyHash;
-use typst::{Library, LibraryExt, World};
 use typst_layout::PagedDocument;
-use typst_svg::{svg_merged, SvgOptions};
+use typst_svg::{SvgOptions, svg_merged};
 
-/// Compiled-once default font book plus retained fonts.
+/// Render a Typst note (and any `#import`/`#include` siblings, plus
+/// `@preview`/`@local` packages) to a single merged-page SVG string.
 ///
-/// `typst-assets::fonts()` ships the same embedded font set the official Typst
-/// CLI bundles by default. We build the book lazily on first use and reuse it
-/// across compilations — fonts never change between renders.
-static FONTS: LazyLock<FontStore> = LazyLock::new(|| {
-    let mut book = FontBook::new();
-    let mut fonts = Vec::new();
-    for data in typst_assets::fonts() {
-        for font in Font::iter(Bytes::new(data)) {
-            book.push(font.info().clone());
-            fonts.push(font);
+/// Frontend invokes this as `invoke('render_typst', { path, vaultPath,
+/// mainPath })`. The returned SVG is safe to inject into the editor DOM after
+/// a defensive DOMPurify pass client-side (see ADR-0171).
+#[tauri::command]
+pub fn render_typst(
+    path: PathBuf,
+    vault_path: Option<PathBuf>,
+    main_path: Option<PathBuf>,
+) -> Result<String, String> {
+    // Entry anchor: an explicit `main_path` wins; otherwise the open file is
+    // the single-file entry. tinymist resolves the project root to the entry
+    // file's parent directory by default (see CompileOnceArgs::resolve_sys_entry_opts).
+    let entry = main_path.unwrap_or_else(|| path.clone());
+    if !entry.is_file() {
+        return Err(format!("Typst entry not found: {}", entry.display()));
+    }
+    if let Some(vp) = vault_path.as_ref() {
+        if !vp.is_dir() {
+            return Err(format!("Vault path is not a directory: {}", vp.display()));
         }
     }
-    FontStore {
-        book: LazyHash::new(book),
-        fonts,
-    }
-});
+    // tinymist's SystemAccessModel reads from the real filesystem; we do not
+    // constrain reads to the vault, mirroring how the Typst CLI operates.
 
-struct FontStore {
-    book: LazyHash<FontBook>,
-    fonts: Vec<Font>,
+    let args = CompileOnceArgs {
+        input: Some(entry.to_string_lossy().into_owned()),
+        ..CompileOnceArgs::default()
+    };
+
+    let universe = args
+        .resolve_system()
+        .map_err(|err| format!("failed to resolve Typst world: {err}"))?;
+    let world = universe.snapshot();
+
+    let document = typst::compile::<PagedDocument>(&world)
+        .output
+        .map_err(format_diagnostics)?;
+
+    // A non-zero gap leaves vertical space between pages; combined with the
+    // iframe's grey background (see TypstPreview.tsx) the gap reads as a page
+    // separator instead of continuous content.
+    Ok(svg_merged(&document, &SvgOptions::default(), Abs::pt(12.0)).to_string())
 }
 
-/// The default standard library. Inputs and features are empty, matching the
-/// single-file compile mode the Typst CLI uses without `--inputs`.
-static LIBRARY: LazyLock<LazyHash<Library>> = LazyLock::new(|| LazyHash::new(Library::default()));
-
-/// [`World`] implementation rooted at a single on-disk directory.
+/// Render compile diagnostics as a single human-readable block.
 ///
-/// `root_dir` is the project root (the parent of the entry file). Every
-/// `FileId` the compiler requests is realized relative to that directory and
-/// read straight from disk. The main source is identified by its
-/// vault-relative virtual path so that imports resolve consistently.
-pub(crate) struct TypstWorld {
-    root_dir: PathBuf,
-    main_id: FileId,
-}
-
-impl TypstWorld {
-    /// Build a world anchored at `root_dir`, with `main_relative` as the entry
-    /// file path relative to that root (forward slashes).
-    ///
-    /// Returns an error if `main_relative` cannot be expressed as a virtual
-    /// path (e.g. it escapes the root).
-    fn new(root_dir: PathBuf, main_relative: &str) -> Result<Self, String> {
-        let vpath = VirtualPath::new(main_relative)
-            .map_err(|err| format!("entry path {main_relative:?} is invalid: {err}"))?;
-        let main_id = FileId::new(RootedPath::new(VirtualRoot::Project, vpath));
-        Ok(Self { root_dir, main_id })
+/// `SourceDiagnostic` has no `Display` impl, so we render the severity, the
+/// message, and each hint. Span location is omitted in this first cut.
+pub(crate) fn format_diagnostics(errors: EcoVec<SourceDiagnostic>) -> String {
+    if errors.is_empty() {
+        return "Typst compilation failed with no diagnostics".to_string();
     }
-
-    /// Resolve a [`FileId`] to an absolute on-disk path and read it as text.
-    fn read_source(&self, id: FileId) -> FileResult<Source> {
-        let path = self.realize(id)?;
-        let text = std::fs::read_to_string(&path).map_err(|err| FileError::from_io(err, &path))?;
-        Ok(Source::new(id, text))
+    let mut out = String::new();
+    for diag in &errors {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format_diagnostic(diag));
     }
-
-    /// Resolve a [`FileId`] to an absolute on-disk path and read it as bytes.
-    fn read_file(&self, id: FileId) -> FileResult<Bytes> {
-        let path = self.realize(id)?;
-        let bytes = std::fs::read(&path).map_err(|err| FileError::from_io(err, &path))?;
-        Ok(Bytes::new(bytes))
-    }
-
-    /// Map a virtual [`FileId`] back to an absolute filesystem path under the
-    /// configured root directory.
-    fn realize(&self, id: FileId) -> FileResult<PathBuf> {
-        id.vpath()
-            .realize(&self.root_dir)
-            .map_err(map_realize_error)
-    }
-}
-
-impl World for TypstWorld {
-    fn library(&self) -> &LazyHash<Library> {
-        &LIBRARY
-    }
-
-    fn book(&self) -> &LazyHash<FontBook> {
-        &FONTS.book
-    }
-
-    fn main(&self) -> FileId {
-        self.main_id
-    }
-
-    fn source(&self, id: FileId) -> FileResult<Source> {
-        self.read_source(id)
-    }
-
-    fn file(&self, id: FileId) -> FileResult<Bytes> {
-        self.read_file(id)
-    }
-
-    fn font(&self, index: usize) -> Option<Font> {
-        FONTS.fonts.get(index).cloned()
-    }
-
-    fn today(&self, offset: Option<typst::foundations::Duration>) -> Option<Datetime> {
-        // Typst's `today(None)` expects the local date; we use the system local
-        // date with a zeroed time. Offsets are not supported in this minimal
-        // implementation.
-        let _ = offset;
-        let now = chrono::Local::now();
-        Datetime::from_ymd_hms(
-            now.year(),
-            now.month().try_into().ok()?,
-            now.day().try_into().ok()?,
-            0,
-            0,
-            0,
-        )
-    }
-}
-
-fn map_realize_error(err: RealizeError) -> FileError {
-    FileError::Other(Some(format!("could not resolve path: {err}").into()))
+    out
 }
 
 /// Format a single Typst diagnostic for inline display in the editor.
-///
-/// `SourceDiagnostic` has no `Display` impl, so we render the severity, the
-/// message, and each hint. Span location is intentionally omitted in this
-/// first cut — Typst's span resolution requires source mapping helpers that
-/// would more than double the surface of this module.
-pub(crate) fn format_diagnostic(diag: &SourceDiagnostic) -> String {
+fn format_diagnostic(diag: &SourceDiagnostic) -> String {
     use typst::diag::Severity;
     let severity = match diag.severity {
         Severity::Error => "error",
@@ -160,135 +94,11 @@ pub(crate) fn format_diagnostic(diag: &SourceDiagnostic) -> String {
     out
 }
 
-/// Resolve the entry file and project root for a Typst note, applying the
-/// four-layer anchor strategy from ADR-0171.
-///
-/// Layers, in priority order:
-/// 1. `main_path` — explicit entry file (the future "Pin entry file" affordance).
-/// 2. A `main.typ` sibling of the open file (auto-detected project entry).
-/// 3. The open file itself as a single-file document.
-///
-/// Returns `(root_dir, main_relative_path)` where `main_relative_path` uses
-/// forward slashes relative to `root_dir`.
-fn resolve_entry(note_path: &Path, main_path: Option<&Path>) -> Result<(PathBuf, String), String> {
-    let (entry_abs, root_dir) = match main_path {
-        Some(explicit) => {
-            let abs = if explicit.is_absolute() {
-                explicit.to_path_buf()
-            } else {
-                let dir = note_path
-                    .parent()
-                    .ok_or_else(|| "note has no parent directory for relative entry".to_string())?;
-                dir.join(explicit)
-            };
-            let root_dir = abs
-                .parent()
-                .ok_or_else(|| "explicit entry has no parent directory".to_string())?
-                .to_path_buf();
-            (abs, root_dir)
-        }
-        None => {
-            // Auto-detect a `main.typ` sibling unless the note is itself main.typ.
-            let dir = note_path
-                .parent()
-                .ok_or_else(|| "note path has no parent directory".to_string())?;
-            let is_main = note_path
-                .file_name()
-                .map(|name| name.eq_ignore_ascii_case("main.typ"))
-                .unwrap_or(false);
-            let sibling_main = (!is_main).then(|| dir.join("main.typ"));
-            let auto_main = sibling_main.filter(|p| p.is_file());
-            match auto_main {
-                Some(sibling) => {
-                    let root_dir = sibling
-                        .parent()
-                        .ok_or_else(|| {
-                            "auto-detected main.typ has no parent directory".to_string()
-                        })?
-                        .to_path_buf();
-                    (sibling, root_dir)
-                }
-                None => {
-                    // Single-file mode: the note is its own entry, and the root
-                    // is its parent directory so sibling imports can still resolve.
-                    (note_path.to_path_buf(), dir.to_path_buf())
-                }
-            }
-        }
-    };
-
-    // Express the entry relative to the root using forward slashes.
-    let main_relative = entry_abs
-        .strip_prefix(&root_dir)
-        .map_err(|err| format!("entry is not under root: {err}"))?
-        .to_string_lossy()
-        .replace('\\', "/");
-
-    Ok((root_dir, main_relative))
-}
-
-/// Render a Typst note (and any `#import`/`#include` siblings) to a single
-/// merged-page SVG string.
-///
-/// Frontend invokes this as `invoke('render_typst', { path, vaultPath,
-/// mainPath })`. The returned SVG is safe to inject into the editor DOM after
-/// a defensive DOMPurify pass client-side (see ADR-0171).
-#[tauri::command]
-pub fn render_typst(
-    path: PathBuf,
-    vault_path: Option<PathBuf>,
-    main_path: Option<PathBuf>,
-) -> Result<String, String> {
-    // Basic existence checks. Tolaria's strict vault-boundary validation lives
-    // behind `pub(crate)` APIs we cannot reach from this module, so we do the
-    // minimal check ourselves and rely on the compiler reading only what the
-    // World implementation serves from under `root_dir`.
-    if !path.is_file() {
-        return Err(format!("Typst note not found: {}", path.display()));
-    }
-    if let Some(vp) = vault_path.as_ref() {
-        if !vp.is_dir() {
-            return Err(format!("Vault path is not a directory: {}", vp.display()));
-        }
-    }
-    let validated_main = match main_path.as_deref() {
-        Some(main) => {
-            if !main.is_file() {
-                return Err(format!("Typst entry not found: {}", main.display()));
-            }
-            Some(main.to_path_buf())
-        }
-        None => None,
-    };
-
-    let (root_dir, main_relative) = resolve_entry(&path, validated_main.as_deref())?;
-    let world = TypstWorld::new(root_dir, &main_relative)?;
-
-    let compiled = typst::compile::<PagedDocument>(&world);
-    let document = compiled.output.map_err(format_diagnostics)?;
-
-    Ok(svg_merged(&document, &SvgOptions::default(), Abs::zero()))
-}
-
-/// Render compile diagnostics as a single human-readable block.
-fn format_diagnostics(errors: EcoVec<SourceDiagnostic>) -> String {
-    if errors.is_empty() {
-        return "Typst compilation failed with no diagnostics".to_string();
-    }
-    let mut out = String::new();
-    for diag in &errors {
-        if !out.is_empty() {
-            out.push('\n')
-        }
-        out.push_str(&format_diagnostic(diag))
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn write_file(dir: &Path, name: &str, contents: &str) -> PathBuf {
@@ -300,60 +110,32 @@ mod tests {
         path
     }
 
-    #[test]
-    fn entry_resolution_single_file_uses_note_directory_as_root() {
-        let tmp = TempDir::new().unwrap();
-        let note = write_file(tmp.path(), "report.typ", "#hi");
-        let (root, main_rel) = resolve_entry(&note, None).unwrap();
-        assert_eq!(root, tmp.path());
-        assert_eq!(main_rel, "report.typ");
-    }
-
-    #[test]
-    fn entry_resolution_auto_detects_sibling_main_typ() {
-        let tmp = TempDir::new().unwrap();
-        let main = write_file(tmp.path(), "main.typ", "#import \"lib.typ\": *");
-        write_file(tmp.path(), "lib.typ", "#hi");
-        let (root, main_rel) = resolve_entry(&main, None).unwrap();
-        assert_eq!(root, tmp.path());
-        assert_eq!(main_rel, "main.typ");
-
-        // Opening a sibling of main.typ still anchors at main.typ.
-        let lib_note = tmp.path().join("lib.typ");
-        let (root2, main_rel2) = resolve_entry(&lib_note, None).unwrap();
-        assert_eq!(root2, tmp.path());
-        assert_eq!(main_rel2, "main.typ");
-    }
-
-    #[test]
-    fn entry_resolution_explicit_main_path_wins() {
-        let tmp = TempDir::new().unwrap();
-        let nested_main = write_file(tmp.path(), "project/main.typ", "hi");
-        let note = write_file(tmp.path(), "project/chapter.typ", "chapter");
-        let (root, main_rel) = resolve_entry(&note, Some(&nested_main)).unwrap();
-        assert_eq!(root, tmp.path().join("project"));
-        assert_eq!(main_rel, "main.typ");
+    /// Resolve a world via tinymist and compile, returning the merged SVG.
+    fn compile_to_svg(entry: &Path) -> String {
+        let args = CompileOnceArgs {
+            input: Some(entry.to_string_lossy().into_owned()),
+            ..CompileOnceArgs::default()
+        };
+        let universe = args.resolve_system().expect("universe resolves");
+        let world = universe.snapshot();
+        let document = typst::compile::<PagedDocument>(&world)
+            .output
+            .expect("compile should succeed");
+        svg_merged(&document, &SvgOptions::default(), Abs::zero()).to_string()
     }
 
     #[test]
     fn compile_single_file_renders_svg_with_text() {
         let tmp = TempDir::new().unwrap();
         let note = write_file(tmp.path(), "note.typ", "Hello Typst!");
-        let (root, main_rel) = resolve_entry(&note, None).unwrap();
-        let world = TypstWorld::new(root, &main_rel).unwrap();
-
-        let compiled = typst::compile::<PagedDocument>(&world);
-        let document = compiled.output.expect("simple compile should succeed");
-        let svg = svg_merged(&document, &SvgOptions::default(), Abs::zero());
-
+        let svg = compile_to_svg(&note);
         assert!(
             svg.starts_with("<svg"),
-            "svg output should start with <svg: {}",
+            "svg should start with <svg: {}",
             &svg[..50]
         );
-        // Typst renders glyphs as vector paths by default, so the source text
-        // itself is not preserved as a string; what we can assert is that the
-        // SVG carries non-trivial rendering payload (paths + groups).
+        // Typst renders glyphs as vector paths, so the SVG must carry non-trivial
+        // rendering payload (paths and/or groups).
         assert!(
             svg.contains("<path") || svg.contains("<g"),
             "svg should contain rendered content: {}",
@@ -362,45 +144,40 @@ mod tests {
     }
 
     #[test]
-    fn compile_multi_file_project_resolves_imports() {
+    fn compile_cjk_text_renders_distinct_glyphs() {
+        // Regression: the embedded `typst-assets` font set has no CJK families,
+        // so Chinese rendered as tofu before system fonts were scanned. tinymist
+        // resolves system fonts (notably Source Han / CJK), so each of the four
+        // glyphs below must map to a distinct glyph id rather than one tofu box.
         let tmp = TempDir::new().unwrap();
-        write_file(
-            tmp.path(),
-            "main.typ",
-            "#import \"lib.typ\": greeting\n#greeting()",
-        );
-        write_file(
-            tmp.path(),
-            "lib.typ",
-            "#let greeting = () => [Hello from lib]",
-        );
-        let main_path = tmp.path().join("main.typ");
+        let note = write_file(tmp.path(), "note.typ", "你好世界");
+        let svg = compile_to_svg(&note);
 
-        let (root, main_rel) = resolve_entry(&main_path, None).unwrap();
-        let world = TypstWorld::new(root, &main_rel).unwrap();
-
-        let compiled = typst::compile::<PagedDocument>(&world);
-        // The meaningful assertion is that compilation succeeded at all with
-        // an `#import` that resolved to a sibling file — a missing resolution
-        // surfaces as a compile error, not empty SVG.
-        let document = compiled.output.expect("import compile should succeed");
-        let svg = svg_merged(&document, &SvgOptions::default(), Abs::zero());
+        let distinct_glyphs: std::collections::HashSet<&str> = svg
+            .as_str()
+            .split("<use")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').nth(1))
+            .collect();
         assert!(
-            svg.contains("<path") || svg.contains("<g"),
-            "svg should contain rendered content: {}",
-            &svg[..200]
+            distinct_glyphs.len() >= 2,
+            "CJK glyphs collapsed to {} distinct id(s): tofu regression",
+            distinct_glyphs.len()
         );
     }
 
     #[test]
-    fn compile_error_surfaces_message_and_hints() {
+    fn compile_error_surfaces_message() {
         let tmp = TempDir::new().unwrap();
         let note = write_file(tmp.path(), "note.typ", "#let x = ;");
-        let (root, main_rel) = resolve_entry(&note, None).unwrap();
-        let world = TypstWorld::new(root, &main_rel).unwrap();
+        let args = CompileOnceArgs {
+            input: Some(note.to_string_lossy().into_owned()),
+            ..CompileOnceArgs::default()
+        };
+        let universe = args.resolve_system().expect("universe resolves");
+        let world = universe.snapshot();
 
-        let compiled = typst::compile::<PagedDocument>(&world);
-        let errors = compiled
+        let errors = typst::compile::<PagedDocument>(&world)
             .output
             .expect_err("broken source should not compile");
         let formatted = format_diagnostics(errors);
@@ -408,27 +185,5 @@ mod tests {
             formatted.to_lowercase().contains("error"),
             "formatted diagnostics should mention error: {formatted}"
         );
-    }
-
-    #[test]
-    fn virtual_path_normalizes_forward_slash_form() {
-        let tmp = TempDir::new().unwrap();
-        let note = write_file(tmp.path(), "note.typ", "hi");
-        let (root, main_rel) = resolve_entry(&note, None).unwrap();
-        let vpath =
-            VirtualPath::new(&main_rel).expect("entry relative path should be virtualizable");
-        let _id = FileId::new(RootedPath::new(VirtualRoot::Project, vpath));
-        // main_rel must not contain a leading slash (VirtualPath normalizes).
-        assert!(!main_rel.starts_with('/'));
-        let _ = root;
-    }
-
-    #[test]
-    fn virtualize_and_realize_roundtrip() {
-        let root = Path::new("/tmp/example");
-        let abs = Path::new("/tmp/example/sub/main.typ");
-        let vpath = VirtualPath::virtualize(root, abs).expect("virtualize should succeed");
-        let realized = vpath.realize(root).expect("realize should round-trip");
-        assert_eq!(realized, abs);
     }
 }

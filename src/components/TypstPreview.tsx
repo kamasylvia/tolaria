@@ -39,8 +39,18 @@ function reducer(_state: RenderState, action: Action): RenderState {
   }
 }
 
+// Typst renders each text glyph as a `<symbol>` definition in `<defs>` plus a
+// `<use xlink:href="#frag">` reference at the glyph position. DOMPurify's svg
+// profile strips `<use>` and `xlink:href` by default (external-reference XSS
+// risk), which silently blanks all text — only table borders (direct `<path>`
+// elements) survive. We restore both: the Typst compiler never emits external
+// `xlink:href` targets, only same-document `#frag` ids, so the XSS vector that
+// motivated the default drop does not apply here. Script/event handlers stay
+// forbidden as a defense-in-depth backstop.
 const SANITIZE_CONFIG: DOMPurify.Config = {
   USE_PROFILES: { svg: true, svgFilters: true },
+  ADD_TAGS: ['use'],
+  ADD_ATTR: ['xlink:href', 'href'],
   FORBID_TAGS: ['script'],
   FORBID_ATTR: ['onload', 'onclick', 'onerror'],
 }
@@ -112,7 +122,7 @@ export function TypstPreview({ content, path, vaultPath }: TypstPreviewProps) {
 
   const srcDoc =
     state.kind === 'ready'
-      ? `<!DOCTYPE html><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:transparent;}svg{display:block;max-width:100%;height:auto;}</style>${state.svg}`
+      ? `<!DOCTYPE html><meta charset="utf-8"><style>html,body{margin:0;padding:24px;background:transparent;}svg{display:block;max-width:100%;height:auto;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.25));}</style>${state.svg}`
       : ''
 
   return (
@@ -142,7 +152,7 @@ export function TypstPreview({ content, path, vaultPath }: TypstPreviewProps) {
       {state.kind === 'ready' && (
         <iframe
           ref={frameRef}
-          className="h-full min-h-[320px] w-full border-0 bg-white"
+          className="h-full min-h-[320px] w-full border-0 bg-muted"
           data-testid="typst-preview-frame"
           referrerPolicy="no-referrer"
           sandbox="allow-popups allow-popups-to-escape-sandbox"
