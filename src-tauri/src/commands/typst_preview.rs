@@ -13,7 +13,7 @@ use tinymist_world::args::CompileOnceArgs;
 use typst::diag::{EcoVec, SourceDiagnostic};
 use typst::layout::Abs;
 use typst_layout::PagedDocument;
-use typst_svg::{SvgOptions, svg_merged};
+use typst_svg::{svg_merged, SvgOptions};
 
 /// Render a Typst note (and any `#import`/`#include` siblings, plus
 /// `@preview`/`@local` packages) to a single merged-page SVG string.
