@@ -66,8 +66,11 @@ ensure_node_tooling() {
 
 require_main_push() {
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
-    echo "❌ Pushes must happen from main or a detached HEAD that is pushed directly to main. Current branch: $CURRENT_BRANCH"
+  # Allow main, detached HEAD, and contribution branches (feat/*, fix/*) that
+  # back upstream PRs. The quality gates below still run for every push.
+  if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "HEAD" ] \
+     && ! echo "$CURRENT_BRANCH" | grep -qE '^(feat|fix)/'; then
+    echo "❌ Pushes must happen from main, a detached HEAD, or a feat/*/fix/* contribution branch. Current branch: $CURRENT_BRANCH"
     exit 1
   fi
 
@@ -79,10 +82,14 @@ require_main_push() {
         ;;
       HEAD:refs/heads/main)
         ;;
+      refs/heads/feat/*:refs/heads/feat/*)
+        ;;
+      refs/heads/fix/*:refs/heads/fix/*)
+        ;;
       refs/tags/*:refs/tags/*)
         ;;
       *)
-        echo "❌ Pushes must be main -> main only."
+        echo "❌ Pushes must be main -> main, HEAD -> main, feat/* -> feat/*, fix/* -> fix/*, or a tag."
         echo "   Attempted: ${LOCAL_REF:-<none>} -> ${REMOTE_REF:-<none>}"
         exit 1
         ;;
