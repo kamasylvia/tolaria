@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useEffect, useReducer, useRef } from 'react'
-import DOMPurify from 'dompurify'
+import DOMPurify, { type Config as DOMPurifyConfig } from 'dompurify'
 import { trackEvent } from '../lib/telemetry'
 import { isTauri } from '../mock-tauri'
 import { focusNoteListContainer } from '../utils/neighborhoodHistory'
@@ -47,7 +47,7 @@ function reducer(_state: RenderState, action: Action): RenderState {
 // `xlink:href` targets, only same-document `#frag` ids, so the XSS vector that
 // motivated the default drop does not apply here. Script/event handlers stay
 // forbidden as a defense-in-depth backstop.
-const SANITIZE_CONFIG: DOMPurify.Config = {
+const SANITIZE_CONFIG: DOMPurifyConfig = {
   USE_PROFILES: { svg: true, svgFilters: true },
   ADD_TAGS: ['use'],
   ADD_ATTR: ['xlink:href', 'href'],
