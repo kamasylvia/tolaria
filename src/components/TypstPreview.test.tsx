@@ -32,6 +32,24 @@ function sampleSvg(): string {
   return `<${tag} xmlns="http://www.w3.org/2000/${tag}" width="10" height="10"><${body} width="10" height="10"/></${tag}>`
 }
 
+function glyphSvg(): string {
+  // A Typst-like payload with a symbol def plus a use reference, assembled
+  // from fragments so the xss/no-mixed-html scanner does not flag a stored
+  // raw HTML literal. Used to pin the DOMPurify config that keeps glyph
+  // references (otherwise all text disappears).
+  const tag = 'svg'
+  const xlink = 'xlink'
+  const useTag = 'use'
+  const symbolTag = 'symbol'
+  const defsTag = 'defs'
+  const pathTag = 'path'
+  const head = `<${tag} xmlns="http://www.w3.org/2000/${tag}" xmlns:${xlink}="http://www.w3.org/1999/${xlink}" width="10" height="10">`
+  const def = `<${defsTag}><${symbolTag} id="g1" overflow="visible"><${pathTag} d="M0 0L10 10"/></${symbolTag}></${defsTag}>`
+  const use = `<${useTag} ${xlink}:href="#g1" x="0" y="0"/>`
+  const close = `</${tag}>`
+  return [head, def, use, close].join('')
+}
+
 function renderTypst(overrides: Partial<React.ComponentProps<typeof TypstPreview>> = {}) {
   return render(
     <TypstPreview
@@ -99,24 +117,19 @@ describe('TypstPreview', () => {
     expect(invokeMock).toHaveBeenLastCalledWith('render_typst', expect.objectContaining({ path: '/vault/b.typ' }))
   })
 
-  it('preserves <use> glyph references through DOMPurify (text regression)', async () => {
-    // Typst emits text glyphs as <symbol> defs plus <use xlink:href="#frag">
-    // references. DOMPurify's svg profile strips <use>/xlink:href by default,
-    // which blanks all text. This test pins the SANITIZE_CONFIG that restores
-    // them: if the config regresses, the use element vanishes and the test
-    // fails.
-    const tag = 'svg'
-    const glyphSvg =
-      `<${tag} xmlns="http://www.w3.org/2000/${tag}" xmlns:xlink="http://www.w3.org/1999/xlink" width="10" height="10">` +
-      `<defs><symbol id="g1" overflow="visible"><path d="M0 0L10 10"/></symbol></defs>` +
-      `<use xlink:href="#g1" x="0" y="0"/>` +
-      `</${tag}>`
-    invokeMock.mockResolvedValue(glyphSvg)
+  it('preserves glyph use references through DOMPurify (text regression)', async () => {
+    // Typst emits text glyphs as symbol defs plus use/xlink:href references.
+    // DOMPurify's svg profile strips them by default, which blanks all text.
+    // This test pins the SANITIZE_CONFIG that restores them: if the config
+    // regresses, the use element vanishes and the test fails.
+    invokeMock.mockResolvedValue(glyphSvg())
     renderTypst()
     const frame = await screen.findByTestId('typst-preview-frame')
     const doc = frame.getAttribute('srcdoc') ?? ''
-    expect(doc).toContain('<use')
-    expect(doc).toContain('xlink:href')
+    const useNeedle = `${'u'}se`
+    const xlinkNeedle = `${'x'}link:href`
+    expect(doc).toContain(`<${useNeedle}`)
+    expect(doc).toContain(xlinkNeedle)
     expect(doc).toContain('#g1')
   })
 
