@@ -69,68 +69,34 @@
 
 ## 3. 功能 A：Typst 预览
 
-**状态**：✅ 已完成（2026-07-23，已 push 到 origin/main）
+**状态**：✅ 已完成（2026-07-23，已 push 到 origin/main `464f00ad`）
 
-实现采用 tinymist-world 集成方案（ADR-0171 选型的演进）：`CompileOnceArgs::resolve_system()` + `typst::compile` + `svg_merged`，字体/包/VFS 全交 tinymist。typst_preview.rs 仅 189 行薄壳。详见 commit `5dd8990b` 及后续（DOMPurify glyph 保留、分页视觉、folder 单层/递归 toggle）。
+### 实际实现（tinymist-world 集成，ADR-0171 选型的演进）
 
-### 选型（已定）
+原选型（Option 3：typst crate 自实现 World）在实现中演变为**委托 tinymist-world**——后者已成熟解决字体/包/VFS/诊断，自实现属重复造轮。typst_preview.rs 从设计稿的 ~80 行 World + 手写字体/包逻辑，收敛为 189 行薄壳。
 
-**Option 3：`typst` Rust crate 在 src-tauri 编译，SVG 经 `invoke` 回前端 inline 渲染**
+- **Rust**：`src-tauri/src/commands/typst_preview.rs`（189 行）—— `#[tauri::command] render_typst(path, vault_path, main_path)` 调 `tinymist_world::args::CompileOnceArgs::resolve_system()` → `snapshot()` → `typst::compile::<PagedDocument>` → `typst_svg::svg_merged`（12pt 页间距）
+- **依赖**：`typst/typst-svg/typst-layout/typst-assets 0.15.1` + `tinymist-world 0.15.0 (features=["system"])`。`system` 拉 fontdb/reqwest/lsp-types/clap/rayon（重依赖，一次性编译）
+- **前端**：`src/components/TypstPreview.tsx` —— invoke `render_typst` → DOMPurify sanitize（保留 `<use>`/`xlink:href`，typst 只输出内部 `#frag`）→ iframe `srcDoc`（灰底 + svg drop-shadow + 12pt gap 分页视觉）
+- **字体/包**：全交 tinymist（SystemFontSearcher 算 FontInfo 后丢 fontdb；HttpRegistry 下拉 + 缓存 @preview/@local 包）
+- **file kind**：`src-tauri/src/vault/mod.rs classify_file_kind` `.typ`/`.typst` → `"typst"`
+- **测试**：`cargo test --lib commands::typst_preview`（3：single-file SVG、CJK distinct-glyph、error diagnostics）；`TypstPreview.test.tsx`（6：含 `<use>` 保留 regression）
 
-- 纯 Rust 依赖，零 JS bundle 增重
-- SVG 经 `dompurify.sanitize` inline 注入主 webview（复用 `FilePreview.tsx` 的 `<object>` PDF 模式思路）
-- `typst::World` trait 的 `main()` + `FileId`-相对-root 是 `#import`/`#include` 相对路径的锚点机制
+关键 commit：`ee248111`（tinymist 集成）、`5dd8990b`（push 含 DOMPurify/分页/folder toggle）、`464f00ad`（docs）。详见 git log。
 
-否决方案：
-- tinymist sidecar（~20-30 MB 原生二进制 + WebSocket + CSP 改 `ws://127.0.0.1:23635`，过重）
-- typst.ts WASM（JS bundle 涨 5-10 MB，与"keep the app lean"冲突）
+### 待办（ Typst 预览后续增强，未做）
 
-### 落点（架构调研已确认）
-
-**Rust 侧**：
-- `src-tauri/Cargo.toml` 加：`typst = "0.14"`、`typst-svg = "0.14"`、`typst-assets = "0.14"`（内嵌字体）；可选 `typst-pdf = "0.14"`（复用现有 PDF 预览）
-- 新建 `src-tauri/src/commands/typst.rs`：`#[tauri::command] render_typst(entry_path, root_path, main_path) -> Result<String, String>` 返回合并多页 SVG
-- 实现 `typst::World`（参考 `typst-cli` / `typst-as-lib`，约 80 行）
-- `src-tauri/src/commands/mod.rs` 加 `pub mod typst;` + re-export
-- `src-tauri/src/lib.rs:485` 在 `app_invoke_handler!` 宏注册 `commands::render_typst`
-- `src-tauri/src/vault/mod.rs:329 classify_file_kind` 加 `.typ`/`.typst` → 新 `fileKind: "typst"`
-
-**前端**：
-- `src/utils/filePreview.ts`：`FilePreviewKind` 加 `'typst'`，扩展名集合加 `'typ'`/`'typst'`；放宽 `if (entry.fileKind && entry.fileKind !== 'binary') return null` 守卫
-- `src/components/FilePreview.tsx` 的 `FilePreviewBody` 加 `previewKind === 'typst'` 分支
-- 复用 `vault_watcher` 监听 `.typ` 变更重渲染
-- `FilePreviewHeaderIcon` 加 typst 图标
-
-### 入口文件锚点（4 层优先级）
-
-`#import` 相对路径要锚到项目主文件（大概率 `main.typ` 但可能不是）：
-
-1. **frontmatter 提示**：`typst_root: report/main.typ` → 以该文件为入口、其父目录为 root
-2. **会话手动 pin**：preview 工具栏"Pin entry file"（对齐 tinymist 的 `tinymist.pinMainToCurrent`）
-3. **自动探测**：同目录有 `main.typ` → 一键"Preview as project (main.typ)"
-4. **单文件默认**：root = 笔记父目录，main = 笔记本身（对齐 tinymist `singleFile`）
-
-### 交付清单
-
-- [ ] ADR-0171：Typst 预览渲染选型（引 ADR-0002/0108/0136/0154）。编号接上游 0170（`measurable-crash-safe-startup`）
-- [ ] `src-tauri/src/commands/typst.rs` + World impl + `render_typst` 命令
-- [ ] `src-tauri/src/vault/mod.rs:329 classify_file_kind` 加 `.typ`（`TEXT_EXTENSIONS` 在 `mod.rs:260`）
-- [ ] `src/utils/filePreview.ts` + `src/components/FilePreview.tsx` 加 typst 分支
-- [ ] 入口锚点 4 层解析 + UI（frontmatter / pin / auto-detect / single-file）
-- [ ] vitest（前端分发）+ `cargo test`（World 实现）
-- [ ] 本地化（`src/lib/locales/en.json` + `pnpm l10n:translate`）
-- [ ] PostHog：`typst_preview_opened`、`typst_root_pinned`
-- [ ] native QA：`pnpm tauri dev` 截图验证
+- [ ] **入口锚点完善**：当前只支持 `main_path` 显式 + 单文件（path 自身）。设计稿的 4 层里缺：①frontmatter `typst_root:` 提示 ②自动探测同目录 `main.typ` ③会话手动 pin UI。tinymist 的 `EntryOpts` 已支持 root/main 配置，接入即可
+- [ ] **增量 live preview**：当前每次全量 compile。tinymist-preview actor crate（WebSocket + IncrSvgDocServer）可做增量流式，但过重，按需评估
+- [ ] **本地化**：TypstPreview 错误/加载文案未走 `src/lib/locales/en.json`（当前硬编码英文）
+- [ ] **PostHog**：`typst_preview_opened` / `typst_root_pinned` 事件未埋点
+- [ ] **search 查询 × 树**：folder toggle 与 search 的交互（命中笔记自动展开祖先 folder）未做
 
 ### 关键参考
 
-- **ADR-0168**（Sandboxed standalone HTML file previews，2026-07-20）—— 最近的"standalone 文件预览"范例，editor pane 里 sanitized opaque-origin iframe + raw-mode 源码编辑切换。Typst 预览形态最接近这个 ADR，`src/components/HtmlFilePreview.tsx` 是直接的代码模板
-- **ADR-0136**（macOS Webview PDF Export）—— 若 Typst 走"编译 PDF 再预览"分支，复用这条路径
-- **ADR-0086/0098/0110/0121** —— image/pdf/media preview 演进链，`FilePreview.tsx` 的扩展规则与 `<object>` PDF 模式来源
-- tinymist 项目/入口模型：<https://myriad-dreamin.github.io/tinymist/feature/project.html>
-- `typst` crate `World` trait：<https://docs.rs/typst/latest/typst/trait.World.html>
-- typst.ts VFS（备选方案）：<https://github.com/Myriad-Dreamin/typst.ts/discussions/376>
-- dompurify 已在依赖（`3.4.12`），SVG 净化直接用
+- **ADR-0171**（Typst 预览渲染选型）—— 原选型记录，实际实现是其演进（自实现 → tinymist-world）
+- **ADR-0168**（Sandboxed standalone HTML file previews）—— iframe srcDoc + DOMPurify 模式参考
+- tinymist World API：`CompileOnceArgs::resolve_system` / `SystemUniverseBuilder`（crates/tinymist-world/src/system.rs）
 
 ---
 
