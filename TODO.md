@@ -23,8 +23,8 @@
 | `upstream` | `git@github.com:refactoringhq/tolaria.git` | 上游（仅 fetch，吸收更新） |
 
 - fork 是 `refactoringhq/tolaria` 的真 fork（GitHub fork 关系）
-- fork 当前领先 upstream 8 个提交（quick launcher、startup shell、HTML export/PDF 等自有工作）
-- fork 落后 upstream 0 个提交
+- fork 当前领先 upstream（Typst 预览 tinymist 集成、folder 单层/递归 toggle、quick launcher、startup shell、HTML export/PDF 等自有工作）
+- fork 与 upstream 定期手动同步（最近一次 2026-07-23，合并 upstream 8 提交）
 - **ADO 已废除**：pipeline 67（tolaria-upstream-sync）已于 2026-07-17 删除，ADO 不再承担 CI/同步职责
 - GitHub fork 的 Actions 之前已禁用（`enabled: false`）—— **TODO 确认是否需要重新启用**
 
@@ -33,6 +33,18 @@
 - 不跑远程 build/test CI（上游是私有仓库，CI 验证靠本地 pre-push hooks）
 - 上游同步：手动 `git fetch upstream && git merge upstream/main`，处理冲突后 push
 - 本地 pre-push hook（`.husky/pre-push`）是唯一质量门禁
+
+### 分支约定（2026-07-23 定）
+
+| 分支 | 角色 | 推 remote? |
+|---|---|---|
+| `tinymist` | **开发分支** —— 所有功能/修复在此 commit + 测试 | 否（本地） |
+| `main` | **推送分支** —— tinymist 验证通过后 ff/merge 过来，从这里 `git push origin main` | 是（唯一推送源） |
+
+- pre-push hook 限制只允许从 `main` 推送（`.husky/pre-push` 检查当前分支）
+- 工作流：tinymist 开发 → `git checkout main && git merge --ff-only tinymist` → `git push origin main`
+- 上游同步：在 tinymist 上 `git fetch upstream && git merge upstream/main` 解冲突 → 验证 → ff 到 main → push
+- 历史：旧的 `fix/typst-preview-packages-cjk-fonts` 分支（手写 Typst World 方案）已于 2026-07-23 删除，被 main 上的 tinymist-world 方案替代
 
 ---
 
@@ -57,7 +69,9 @@
 
 ## 3. 功能 A：Typst 预览
 
-**状态**：⏳ 待开工
+**状态**：✅ 已完成（2026-07-23，已 push 到 origin/main）
+
+实现采用 tinymist-world 集成方案（ADR-0171 选型的演进）：`CompileOnceArgs::resolve_system()` + `typst::compile` + `svg_merged`，字体/包/VFS 全交 tinymist。typst_preview.rs 仅 189 行薄壳。详见 commit `5dd8990b` 及后续（DOMPurify glyph 保留、分页视觉、folder 单层/递归 toggle）。
 
 ### 选型（已定）
 
