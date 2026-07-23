@@ -508,12 +508,21 @@ function isEntryInSelectedFolder(entryPath: string, folderRelPath: string, rootP
   if (recursive) return isInFolder(relativeEntryPath, folderRelPath)
   // Single-level only: show the folder's direct children (one path segment
   // below the selected folder), not files nested deeper inside subfolders.
-  // The folder may appear at any depth in the relative path (entry paths can
-  // carry a vault-name prefix), but what follows it must be a single segment.
+  // Match by comparing the entry's parent folder path to the selected folder,
+  // allowing the entry path to carry a vault-name prefix. String-only (no
+  // dynamic RegExp) so static-analysis ReDoS rules do not flag it.
   const folder = normalizeFolderPath(folderRelPath)
   if (!folder) return false
-  const escaped = folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(?:^|/)${escaped}/[^/]+$`).test(relativeEntryPath)
+  const parent = parentFolderOf(relativeEntryPath)
+  return parent === folder || parent.endsWith(`/${folder}`)
+}
+
+/** Return the parent folder path of a vault-relative entry path (the path
+ * with its last segment removed). `"a/b/Note.md"` -> `"a/b"`, `"Note.md"` -> `""`. */
+function parentFolderOf(relativePath: string): string {
+  const normalized = normalizeFolderPath(relativePath)
+  const idx = normalized.lastIndexOf('/')
+  return idx < 0 ? '' : normalized.slice(0, idx)
 }
 
 function filterRootEntries(entries: VaultEntry[], rootPath: string | undefined, subFilter?: NoteListFilter): VaultEntry[] {
