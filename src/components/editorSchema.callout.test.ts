@@ -59,6 +59,25 @@ describe('editor callout schema', () => {
     expect(injectCalloutBlocks(parsed).at(0)).toMatchObject({ type: 'quote' })
   })
 
+  it('ignores legacy props that are absent from the current callout schema', async () => {
+    const editor = BlockNoteEditor.create({ schema })
+    const parsed = await editor.tryParseMarkdownToBlocks('> [!note] Legacy')
+    const [callout] = injectCalloutBlocks(parsed)
+    const legacyCallout = {
+      ...callout,
+      props: {
+        ...callout.props,
+        fold: '-',
+      },
+    }
+
+    const serialized = serializeDurableEditorBlocks(
+      editor,
+      [legacyCallout] as Parameters<typeof serializeDurableEditorBlocks>[1],
+    ).trim()
+    expect(serialized).toBe('> [!note] Legacy')
+  })
+
   it('round-trips multiline callout bodies without appending backslashes', async () => {
     const markdown = [
       '> [!note] Clean source',
