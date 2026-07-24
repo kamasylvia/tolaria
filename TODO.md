@@ -50,6 +50,8 @@
 
 ## 2. 开发环境（已就位）
 
+### 机器 A（NixOS，另一台）
+
 - 工作目录：`/Volumes/UNITEK/Documents/Development/tolaria`（外置盘）
 - Shell：fish 4.7.1（默认）；`~/.config/fish/conf.d/dev-caches.fish` 重定向 CARGO_HOME/RUSTUP_HOME/PNPM_HOME 到 `/Volumes/UNITEK/`
 - pnpm 10.34.5（brew `pnpm@10`，与上游 CI 一致）
@@ -57,13 +59,32 @@
 - npm registry 镜像：`registry.npmmirror.com`
 - 凭证：`~/.config/fish/conf.d/secrets.fish`（chmod 600，含 `AZURE_DEVOPS_EXT_PAT`、`GITHUB_TOKEN`）；infisical 连接在 `.infisical.json`（gitignored）
 
-### 内置 SSD 保护
+#### 内置 SSD 保护
 
 内置盘仅 19 GB free。全局缓存全重定向到外置盘：
 - `CARGO_HOME=/Volumes/UNITEK/.cargo`
 - `RUSTUP_HOME=/Volumes/UNITEK/.rustup`
 - `PNPM_HOME=/Volumes/UNITEK/.pnpm` + `pnpm config store-dir /Volumes/UNITEK/.pnpm/store`
 - 项目 `node_modules/` 和 `src-tauri/target/` 跟随项目落外置盘
+
+### 机器 B（macOS arm64，本机）
+
+- 工作目录：`/Volumes/Ext SSD/Documents/Development/tolaria`（外置盘）
+- 系统：macOS darwin 25.5.0 arm64
+- Shell：zsh（默认）
+- pnpm 9.15.9 + node v26.4.0（pre-push 全套门已验证兼容）
+- rustup `stable-aarch64-apple-darwin`（active default），rustc **1.94.1**；home `/Users/kamasylvia/.rustup`（**内置盘**，未重定向）
+- 工具：`cargo-llvm-cov`（已装，pre-push Rust coverage 门要）+ `llvm-tools-preview` component
+
+#### 内置 SSD 现状（紧张）
+
+内置盘 `/System/Volumes/Data` 460G，已用 378G（90%），**剩 44G**。外置盘 `/Volumes/Ext SSD` 1.9T，剩 1.3T。
+
+当前缓存分布：
+- ✅ 已在外置盘：pnpm store（`/Volumes/Ext SSD/.pnpm/store`）、项目 `node_modules`/`src-tauri/target`（跟随项目，target 30G）
+- ⚠️ **在内置盘**：`~/.cargo` 2.9G + `~/.rustup` 3.5G = **6.4G**（未重定向，与机器 A 不同）
+
+**可选优化**（未做）：把 CARGO_HOME/RUSTUP_HOME 重定向到 `/Volumes/Ext SSD/.cargo` + `.rustup`（省 6.4G 内置空间）。代价：外置盘未挂载时 rustup/cargo 不可用。机器 B 当前 44G 够用，暂不重定向。
 
 ---
 
