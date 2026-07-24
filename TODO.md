@@ -100,6 +100,52 @@
 
 ---
 
+## 3.5 功能 A 演进：完整 LSP 体验（tinymist sidecar，计划中）
+
+**状态**：⏳ 计划已批准（2026-07-23），待实施
+
+目标：类 VSCode tinymist 插件体验 —— 编辑器内 LSP（语法高亮 + 补全 + 诊断波浪线 + hover + 跳转）+ 实时增量 preview。当前 §3 的 tinymist-world compile 预览（全量 SVG）将被 sidecar 实时增量 preview 替代；compile 命令保留作离线 fallback。
+
+### 调研结论（关键决策依据）
+
+- **参照**：[`dailydaniel/typos`](https://github.com/dailydaniel/typos)（同栈 Tauri2 + CodeMirror6 + tinymist）做了 LSP 编辑，但**没做** preview actor（用 subprocess 全量 compile）。Tolaria 做 preview actor 是 Tauria 生态首例。
+- **tinymist binary**：GitHub releases 预构建（macOS arm64/x86_64 + Windows + Linux），`tinymist lsp` over stdio JSON-RPC；`tinymist preview <file>` 自带 HTTP 服务器 + `typst-preview.html`（含 reflexo WASM renderer）+ WebSocket 流 `diff-v1,` delta
+- **LSP client**：`@codemirror/lsp-client` 6.2.5（CM6 官方，只差 Transport 实现）+ 自写 `TauriLspTransport`（移植 typos 的 `lspTransport.ts` ~100 行，`Command.sidecar("binaries/tinymist",["lsp"],{encoding:"raw"})` + Content-Length 帧）
+- **语法高亮**：`codemirror-lang-typst` 0.4.0（WASM 绑 typst-syntax 真 parser，markup/code/math 三模式）
+- **preview 嵌入**：iframe 指向 `http://127.0.0.1:<staticPort>/`，tinymist 自带 HTML 自动连 WS 收 delta —— **零 renderer 胶水**（不碰 `@myriaddreamin/typst-ts-renderer`）
+- **两个独立 sidecar**（lsp + preview）比合并到单 LSP 进程的 `tinymist/startPreview` 自定义方法简单
+
+### 分阶段实施（每阶段独立可验 + 可 commit）
+
+1. **sidecar provision + transport spike（阻塞）**：`scripts/fetch-tinymist.mjs` 拉 binary → `src-tauri/binaries/`；`tauri.conf.json` externalBin；`tauri-plugin-shell`；`src/lib/typstLspTransport.ts`。验收：`initialize` 握手通
+2. **语法高亮**：`codemirror-lang-typst`；`rawEditorLanguage.ts` 加 `typ`/`typst`。验收：raw 模式 markup/code/math 着色
+3. **LSP 编辑能力**：`@codemirror/lsp-client`；扩展集加 lsp-client；生命周期 didOpen/didChange/didClose。验收：补全/波浪线/hover/跳转
+4. **实时增量 preview**：新 sidecar `tinymist preview`；解析端口；`TypstPreview.tsx` 改 iframe 指向 served HTML；CSP 放行 `ws://127.0.0.1:*` `http://127.0.0.1:*`。验收：编辑实时增量（~100ms）
+
+### 风险
+
+1. **最大**：Tauri webview 连 localhost WS/HTTP（CSP + iframe sandbox）。先 spike 确认 WKWebView(mac) 能连
+2. sidecar binary 版本与 typst-preview.html 协议耦合（用 tinymist 自带 HTML 保同步）
+3. preview sidecar 端口动态，需从 stdout 解析（日志格式依赖 tinymist 版本）
+
+### 不做（本期）
+
+- semantic tokens 语义高亮（grammar 已覆盖；后续精化）
+- 多 vault LSP 隔离（单 vault）
+- LSP + preview 合并单进程（契约复杂）
+- Windows NSIS sidecar 升级 bug（tauri#15134，发布时处理）
+
+### 关键参考
+
+- 参照实现：https://github.com/dailydaniel/typos（esp. `notes-app/src/lib/lspTransport.ts`）
+- tinymist releases（binary + checksum）：https://github.com/Myriad-Dreamin/tinymist/releases
+- `tinymist preview` 子命令：`crates/tinymist-cli/src/cmd/preview.rs`
+- CM6 LSP client：https://github.com/codemirror/lsp-client
+- CM6 Typst grammar（WASM）：https://github.com/kxxt/codemirror-lang-typst
+- Tauri v2 sidecar：https://v2.tauri.app/develop/sidecar/
+
+---
+
 ## 4. 功能 B：Trilium 风格 Softlinks
 
 **状态**：⏳ 待开工
