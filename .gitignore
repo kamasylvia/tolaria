@@ -47,6 +47,9 @@ src-tauri/target
 # Generated mcp-server bundle (built by scripts/bundle-mcp-server.mjs)
 src-tauri/resources/mcp-server/
 
+# tinymist sidecar binary (fetched at build time by scripts/fetch-tinymist.mjs)
+src-tauri/binaries/
+
 # Python cache
 __pycache__/
 *.py[cod]

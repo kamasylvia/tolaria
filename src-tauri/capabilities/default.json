@@ -27,6 +27,8 @@
     "deep-link:default",
     "updater:default",
     "process:default",
-    "opener:default"
+    "opener:default",
+    "shell:allow-spawn",
+    "shell:allow-stdin-write"
   ]
 }

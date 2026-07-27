@@ -15,7 +15,7 @@ function eslintNinePlugin(plugin) {
 
 export default [
   {
-    files: ['src/**/*.{js,jsx,ts,tsx}', 'scripts/**/*.{js,mjs}'],
+    files: ['src/**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: { ecmaFeatures: { jsx: true }, ecmaVersion: 'latest', sourceType: 'module' },

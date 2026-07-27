@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5202",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build && pnpm bundle-mcp && pnpm agent-docs"
+    "beforeBuildCommand": "pnpm build && pnpm bundle-mcp && pnpm agent-docs && node scripts/fetch-tinymist.mjs"
   },
   "app": {
     "withGlobalTauri": true,
@@ -67,6 +67,7 @@
       "resources/mcp-server/**/*": "mcp-server/",
       "resources/agent-docs/**/*": "agent-docs/"
     },
+    "externalBin": ["binaries/tinymist"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -80,6 +81,19 @@
       "desktop": {
         "schemes": ["tolaria"]
       }
+    },
+    "shell": {
+      "sidecar": {
+        "command": "tinymist",
+        "args": ["lsp"]
+      },
+      "scope": [
+        {
+          "name": "tinymist-lsp",
+          "sidecar": "tinymist",
+          "args": ["lsp"]
+        }
+      ]
     },
     "updater": {
       "endpoints": [
